@@ -156,13 +156,6 @@
   }
   
   /* Make table cells more compact for खातेवही सूची */
-  .print\\:text-\\[6px\\] {
-    font-size: 6px !important;
-  }
-  
-  .print\\:p-0\\.5 {
-    padding: 1px !important;
-  }
   
   .print\\:leading-tight {
     line-height: 1.1 !important;
@@ -256,14 +249,6 @@
   
   .print\\:text-xs {
     font-size: 12px !important;
-  }
-  
-  .print\\:text-\\[8px\\] {
-    font-size: 14px !important;
-  }
-  
-  .print\\:text-\\[10px\\] {
-    font-size: 14px !important;
   }
   
   .print\\:p-1 {
@@ -406,11 +391,6 @@
     display: grid !important;
     grid-template-columns: 1fr 1fr !important;
     gap: 0.25rem !important;
-  }
-  
-  /* Force smaller text for account names to fit better */
-  .print\\:text-\\[5px\\] {
-    font-size: 12px !important;
   }
   
   /* Adjust column spans for better fit */
