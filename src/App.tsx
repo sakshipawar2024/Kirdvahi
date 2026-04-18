@@ -1,10 +1,8 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Outlet } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Outlet, Navigate } from 'react-router-dom';
 import { SchoolProvider } from './contexts/SchoolContext';
 import { AuthProvider } from './contexts/AuthContext';
 import SchoolRouteGuard from './components/SchoolRouteGuard';
 import TableOfContents from './components/TableOfContents';
-import LedgerPage from './components/LedgerPage';
 import EntryPage from './components/EntryPage';
 import AdminLogin from './components/AdminLogin';
 import AdminDashboard from './components/AdminDashboard';
@@ -19,9 +17,7 @@ function App() {
           <div className="min-h-screen bg-amber-50">
             <Routes>
               <Route element={<SchoolRouteGuard><Outlet /></SchoolRouteGuard>}>
-                <Route path="/" element={<TableOfContents />} />
-                <Route path="/ledger/:id" element={<LedgerPage />} />
-                <Route path="/entry" element={<EntryPage />} />
+                <Route path="/" element={<Navigate to="/admin" replace />} />
                 <Route path="/admin/login" element={<AdminLogin />} />
                 <Route
                   path="/admin"
@@ -47,6 +43,7 @@ function App() {
                     </ProtectedRoute>
                   }
                 />
+                <Route path="*" element={<Navigate to="/admin" replace />} />
               </Route>
             </Routes>
           </div>

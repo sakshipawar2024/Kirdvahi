@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSchool, School } from '../contexts/SchoolContext';
 import { useNavigate } from 'react-router-dom';
-import { School as SchoolIcon, Building2, Loader2 } from 'lucide-react';
+import { School as SchoolIcon, Building2, Loader2, Lock, X } from 'lucide-react';
 import { schoolService } from '../services/schoolService';
 import SchoolInitializer from './SchoolInitializer';
 
@@ -9,7 +9,11 @@ const SchoolSelection: React.FC = () => {
   const [schools, setSchools] = useState<School[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { selectSchool } = useSchool();
+  const [authSchool, setAuthSchool] = useState<School | null>(null);
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const { selectSchool, authenticateSchool } = useSchool();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -36,8 +40,53 @@ const SchoolSelection: React.FC = () => {
   };
 
   const handleSelectSchool = (school: School) => {
-    selectSchool(school);
-    navigate('/');
+    setAuthSchool(school);
+    setPassword('');
+    setAuthError('');
+  };
+
+  const closeAuthModal = () => {
+    if (authLoading) {
+      return;
+    }
+    setAuthSchool(null);
+    setPassword('');
+    setAuthError('');
+  };
+
+  const verifySchoolPassword = async () => {
+    if (!authSchool) {
+      return;
+    }
+    const trimmedPassword = password.trim();
+    if (!trimmedPassword) {
+      setAuthError('कृपया पासवर्ड टाका.');
+      return;
+    }
+
+    try {
+      setAuthLoading(true);
+      setAuthError('');
+      const latestSchool = await schoolService.getById(authSchool.id);
+      const expectedPassword = String(latestSchool?.adminPassword || '').trim();
+
+      if (!latestSchool || trimmedPassword !== expectedPassword) {
+        setAuthError('चुकीचा पासवर्ड. कृपया पुन्हा प्रयत्न करा.');
+        return;
+      }
+
+      selectSchool(latestSchool);
+      authenticateSchool(latestSchool.id);
+      localStorage.setItem('admin_session', 'true');
+      localStorage.setItem('admin_school_id', latestSchool.id);
+      setAuthSchool(null);
+      setPassword('');
+      navigate('/admin');
+    } catch {
+      setAuthError('प्रमाणीकरण करताना त्रुटी आली. कृपया पुन्हा प्रयत्न करा.');
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
   if (loading) {
@@ -122,6 +171,7 @@ const SchoolSelection: React.FC = () => {
         {schools.length === 0 ? (
           <SchoolInitializer />
         ) : (
+          <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {schools.map((school) => (
               <button
@@ -135,6 +185,62 @@ const SchoolSelection: React.FC = () => {
               </button>
             ))}
           </div>
+          {authSchool && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black bg-opacity-60" onClick={closeAuthModal}></div>
+              <div className="relative bg-white w-full max-w-md rounded-2xl shadow-2xl p-6">
+                <button
+                  onClick={closeAuthModal}
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+                  aria-label="Close"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+
+                <div className="text-center mb-6">
+                  <div className="bg-amber-100 w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <Lock className="w-7 h-7 text-amber-700" />
+                  </div>
+                  <h2 className="text-xl font-bold text-gray-900 mb-1">शाळा प्रमाणीकरण</h2>
+                  <p className="text-sm text-gray-600">{authSchool.name}</p>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">पासवर्ड</label>
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          void verifySchoolPassword();
+                        }
+                      }}
+                      autoFocus
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                      placeholder="शाळेचा पासवर्ड टाका"
+                    />
+                  </div>
+
+                  {authError && (
+                    <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                      {authError}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => void verifySchoolPassword()}
+                    disabled={authLoading}
+                    className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white py-3 px-4 rounded-lg font-medium transition-colors"
+                  >
+                    {authLoading ? 'पडताळणी होत आहे...' : 'पडताळणी करा'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          </>
         )}
       </div>
     </div>

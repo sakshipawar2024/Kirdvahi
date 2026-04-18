@@ -8,9 +8,9 @@ interface SchoolRouteGuardProps {
 }
 
 const SchoolRouteGuard: React.FC<SchoolRouteGuardProps> = ({ children }) => {
-  const { selectedSchool } = useSchool();
+  const { selectedSchool, isSchoolAuthenticated } = useSchool();
 
-  if (!selectedSchool) {
+  if (!selectedSchool || !isSchoolAuthenticated) {
     return <SchoolSelection />;
   }
 
