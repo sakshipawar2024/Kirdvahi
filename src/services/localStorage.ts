@@ -151,8 +151,8 @@ export const entriesStorage = {
     const nextId = parseInt(localStorage.getItem(NEXT_ENTRY_ID_KEY) || '1');
     const normalizedAccountNumber = normalizeAccountNumber(entry.accountNumber);
     
-    // Verify account exists
-    if (!accounts.some(acc => accountNumbersMatch(acc.khateNumber, normalizedAccountNumber))) {
+    // Verify account exists only when account number is provided
+    if (normalizedAccountNumber && !accounts.some(acc => accountNumbersMatch(acc.khateNumber, normalizedAccountNumber))) {
       throw new Error('Account not found');
     }
     

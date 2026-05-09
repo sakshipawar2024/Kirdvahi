@@ -261,19 +261,24 @@ export const entriesFirebase = {
   // Create new entry
   create: async (schoolId: string, entry: Omit<Entry, 'id' | 'createdAt'>): Promise<Entry> => {
     try {
-      // Verify account exists
-      const accountsQuery = query(
-        getAccountsCollection(schoolId),
-        where('khateNumber', '==', entry.accountNumber)
-      );
-      const accountsSnapshot = await getDocs(accountsQuery);
-      
-      if (accountsSnapshot.empty) {
-        throw new Error('Account not found');
+      const normalizedAccountNumber = normalizeAccountNumber(entry.accountNumber);
+
+      // Verify account exists only when account number is provided
+      if (normalizedAccountNumber) {
+        const accountsQuery = query(
+          getAccountsCollection(schoolId),
+          where('khateNumber', '==', normalizedAccountNumber)
+        );
+        const accountsSnapshot = await getDocs(accountsQuery);
+
+        if (accountsSnapshot.empty) {
+          throw new Error('Account not found');
+        }
       }
 
       const docRef = await addDoc(getEntriesCollection(schoolId), {
         ...entry,
+        accountNumber: normalizedAccountNumber,
         createdAt: serverTimestamp()
       });
 

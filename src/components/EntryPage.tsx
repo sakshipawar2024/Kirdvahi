@@ -38,6 +38,33 @@ const renderAmountWithBreak = (amount: number) => {
   );
 };
 
+const hasEntryAmount = (amount: number | null | undefined): amount is number => {
+  return typeof amount === 'number' && !Number.isNaN(amount);
+};
+
+const isDateOnlyEntry = (entry: Entry | undefined) => {
+  if (!entry) return false;
+
+  const hasAccount = Boolean(entry.accountNumber?.trim());
+  const hasReceipt = Boolean(entry.receiptNumber?.trim());
+  const hasDetails = Boolean(entry.details?.trim());
+  const hasNonZeroAmount = hasEntryAmount(entry.amount) && entry.amount !== 0;
+
+  return !hasAccount && !hasReceipt && !hasDetails && !hasNonZeroAmount;
+};
+
+const shouldShowAmount = (entry: Entry | undefined) => {
+  if (!entry || !hasEntryAmount(entry.amount)) {
+    return false;
+  }
+
+  if (isDateOnlyEntry(entry)) {
+    return false;
+  }
+
+  return true;
+};
+
 const EntryPage: React.FC = () => {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [accounts, setAccounts] = useState<{ [key: string]: string }>({});
@@ -57,6 +84,7 @@ const EntryPage: React.FC = () => {
     details: '',
     amount: ''
   });
+  const [sharedEntryDate, setSharedEntryDate] = useState('');
   const [showAddAccountForm, setShowAddAccountForm] = useState(false);
   const [newAccountName, setNewAccountName] = useState('');
   const [newAccountNumber, setNewAccountNumber] = useState('');
@@ -277,75 +305,116 @@ const EntryPage: React.FC = () => {
     }
   };
 
-  const handleJamaSubmit = async (e: React.FormEvent) => {
+  const hasAnySideData = (formData: {
+    accountNumber: string;
+    receiptNumber: string;
+    details: string;
+    amount: string;
+  }) => {
+    return Boolean(
+      formData.accountNumber.trim() ||
+      formData.receiptNumber.trim() ||
+      formData.details.trim() ||
+      formData.amount.trim()
+    );
+  };
+
+  const handleCombinedSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isOnline) {
       alert('इंटरनेट कनेक्शन नाही! कृपया ऑनलाइन येऊन पुन्हा प्रयत्न करा.');
       return;
     }
-    
-    if (!selectedSchool) return;
-    if (jamaFormData.date && jamaFormData.accountNumber && jamaFormData.details && jamaFormData.amount) {
-      try {
-        await entriesFirebase.create(selectedSchool.id, {
-          date: jamaFormData.date,
-          accountNumber: jamaFormData.accountNumber,
-          receiptNumber: jamaFormData.receiptNumber || '',
-          details: jamaFormData.details,
-          amount: parseFloat(jamaFormData.amount),
-          type: 'जमा'
-        });
-        
-        setJamaFormData({
-          date: '',
-          accountNumber: '',
-          receiptNumber: '',
-          details: '',
-          amount: ''
-        });
-        
-        loadData(); // Reload entries
-      } catch (err) {
-        alert('जमा नोंद जोडताना त्रुटी: ' + handleFirebaseError(err));
-      }
-    }
-  };
 
-  const handleNaveSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isOnline) {
-      alert('इंटरनेट कनेक्शन नाही! कृपया ऑनलाइन येऊन पुन्हा प्रयत्न करा.');
+    if (!selectedSchool) return;
+
+    if (!sharedEntryDate) {
+      alert('कृपया तारीख निवडा.');
       return;
     }
-    
-    if (!selectedSchool) return;
-    if (naveFormData.date && naveFormData.accountNumber && naveFormData.details && naveFormData.amount) {
-      try {
-        await entriesFirebase.create(selectedSchool.id, {
-          date: naveFormData.date,
-          accountNumber: naveFormData.accountNumber,
-          receiptNumber: naveFormData.receiptNumber || '',
-          details: naveFormData.details,
-          amount: parseFloat(naveFormData.amount),
-          type: 'नावे'
-        });
-        
-        setNaveFormData({
-          date: '',
-          accountNumber: '',
-          receiptNumber: '',
-          details: '',
-          amount: ''
-        });
-        
-        loadData(); // Reload entries
-      } catch (err) {
-        alert('नावे नोंद जोडताना त्रुटी: ' + handleFirebaseError(err));
+
+    const jamaAmount = jamaFormData.amount.trim() === '' ? 0 : parseFloat(jamaFormData.amount);
+    const naveAmount = naveFormData.amount.trim() === '' ? 0 : parseFloat(naveFormData.amount);
+
+    if (jamaFormData.amount.trim() !== '' && isNaN(jamaAmount)) {
+      alert('कृपया जमा रक्कम योग्य टाका.');
+      return;
+    }
+
+    if (naveFormData.amount.trim() !== '' && isNaN(naveAmount)) {
+      alert('कृपया नावे रक्कम योग्य टाका.');
+      return;
+    }
+
+    const shouldCreateJama = hasAnySideData(jamaFormData);
+    const shouldCreateNave = hasAnySideData(naveFormData);
+
+    try {
+      const createOperations: Promise<Entry>[] = [];
+
+      if (shouldCreateJama) {
+        createOperations.push(
+          entriesFirebase.create(selectedSchool.id, {
+            date: sharedEntryDate,
+            accountNumber: normalizeAccountNumber(jamaFormData.accountNumber),
+            receiptNumber: jamaFormData.receiptNumber || '',
+            details: jamaFormData.details || '',
+            amount: jamaAmount,
+            type: 'जमा'
+          })
+        );
       }
+
+      if (shouldCreateNave) {
+        createOperations.push(
+          entriesFirebase.create(selectedSchool.id, {
+            date: sharedEntryDate,
+            accountNumber: normalizeAccountNumber(naveFormData.accountNumber),
+            receiptNumber: naveFormData.receiptNumber || '',
+            details: naveFormData.details || '',
+            amount: naveAmount,
+            type: 'नावे'
+          })
+        );
+      }
+
+      // If user keeps both sides empty, still allow a date-only row as requested.
+      if (!shouldCreateJama && !shouldCreateNave) {
+        createOperations.push(
+          entriesFirebase.create(selectedSchool.id, {
+            date: sharedEntryDate,
+            accountNumber: '',
+            receiptNumber: '',
+            details: '',
+            amount: 0,
+            type: 'जमा'
+          })
+        );
+      }
+
+      await Promise.all(createOperations);
+      setJamaFormData({
+        date: '',
+        accountNumber: '',
+        receiptNumber: '',
+        details: '',
+        amount: ''
+      });
+      setNaveFormData({
+        date: '',
+        accountNumber: '',
+        receiptNumber: '',
+        details: '',
+        amount: ''
+      });
+      loadData();
+    } catch (err) {
+      alert('नोंद जोडताना त्रुटी: ' + handleFirebaseError(err));
     }
   };
 
-  const handleJamaReset = () => {
+  const handleCombinedReset = () => {
+    setSharedEntryDate('');
     setJamaFormData({
       date: '',
       accountNumber: '',
@@ -353,9 +422,6 @@ const EntryPage: React.FC = () => {
       details: '',
       amount: ''
     });
-  };
-
-  const handleNaveReset = () => {
     setNaveFormData({
       date: '',
       accountNumber: '',
@@ -416,14 +482,22 @@ const EntryPage: React.FC = () => {
     }
     
     if (!selectedSchool) return;
-    if (editingEntry && editFormData.date && editFormData.accountNumber && editFormData.details && editFormData.amount) {
+    if (editingEntry && editFormData.date) {
       try {
+        const normalizedAccountNumber = normalizeAccountNumber(editFormData.accountNumber);
+        const parsedAmount = editFormData.amount.trim() === '' ? 0 : parseFloat(editFormData.amount);
+
+        if (editFormData.amount.trim() !== '' && isNaN(parsedAmount)) {
+          alert('कृपया योग्य रक्कम टाका.');
+          return;
+        }
+
         await entriesFirebase.update(selectedSchool.id, editingEntry.id!, {
           date: editFormData.date,
-          accountNumber: editFormData.accountNumber,
+          accountNumber: normalizedAccountNumber,
           receiptNumber: editFormData.receiptNumber || '',
-          details: editFormData.details,
-          amount: parseFloat(editFormData.amount)
+          details: editFormData.details || '',
+          amount: parsedAmount
         });
         
         setEditingEntry(null);
@@ -513,7 +587,7 @@ const EntryPage: React.FC = () => {
         excelData.push({
           'तारीख': jamaEntry ? formatDate(jamaEntry.date) : '',
           'खाते नं.': jamaEntry ? jamaEntry.accountNumber : '',
-          'पावती नं.': jamaEntry ? (jamaEntry.receiptNumber || '-') : '',
+          'पावती नं.': jamaEntry ? (jamaEntry.receiptNumber || '') : '',
           'जमेचा तपशील': jamaEntry ? (() => {
             const found = Object.values(accounts).find(name => jamaEntry.details.startsWith(name));
             if (found) {
@@ -522,10 +596,10 @@ const EntryPage: React.FC = () => {
             }
             return jamaEntry.details;
           })() : '',
-          'रक्कम': jamaEntry ? jamaEntry.amount.toFixed(2) : '',
+          'रक्कम': shouldShowAmount(jamaEntry) ? jamaEntry!.amount.toFixed(2) : '',
           'तारीख ': naveEntry ? formatDate(naveEntry.date) : '',
           'खाते नं. ': naveEntry ? naveEntry.accountNumber : '',
-          'पावती नं. ': naveEntry ? (naveEntry.receiptNumber || '-') : '',
+          'पावती नं. ': naveEntry ? (naveEntry.receiptNumber || '') : '',
           'नावेचा तपशील': naveEntry ? (() => {
             const found = Object.values(accounts).find(name => naveEntry.details.startsWith(name));
             if (found) {
@@ -534,13 +608,13 @@ const EntryPage: React.FC = () => {
             }
             return naveEntry.details;
           })() : '',
-          'रक्कम ': naveEntry ? naveEntry.amount.toFixed(2) : ''
+          'रक्कम ': shouldShowAmount(naveEntry) ? naveEntry!.amount.toFixed(2) : ''
         });
       }
       
       // Add daily totals
-      const dailyJamaTotal = jamaEntriesForDate.reduce((sum, entry) => sum + entry.amount, 0);
-      const dailyNaveTotal = naveEntriesForDate.reduce((sum, entry) => sum + entry.amount, 0);
+      const dailyJamaTotal = jamaEntriesForDate.reduce((sum, entry) => sum + (hasEntryAmount(entry.amount) ? entry.amount : 0), 0);
+      const dailyNaveTotal = naveEntriesForDate.reduce((sum, entry) => sum + (hasEntryAmount(entry.amount) ? entry.amount : 0), 0);
       
       excelData.push({
         'तारीख': '',
@@ -771,34 +845,35 @@ const EntryPage: React.FC = () => {
 
         {/* Entry Forms */}
         {isAdmin && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 print:hidden">
-            {/* जमा Entry Form */}
-            <div className="bg-white rounded-lg page-shadow ledger-border p-4">
-              <div className="text-center mb-4">
-                <h2 className="text-xl font-bold text-green-800 marathi-font">जमा नोंद</h2>
-              </div>
+          <form onSubmit={handleCombinedSubmit} className="bg-white rounded-lg page-shadow ledger-border p-4 mb-6 print:hidden">
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-800 marathi-font mb-2">
+                तारीख *
+              </label>
+              <input
+                type="date"
+                name="sharedEntryDate"
+                value={sharedEntryDate}
+                onChange={(e) => setSharedEntryDate(e.target.value)}
+                required
+                disabled={!isOnline}
+                className={`w-full p-3 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${
+                  !isOnline ? 'bg-gray-100 cursor-not-allowed' : ''
+                }`}
+              />
+            </div>
 
-              <form onSubmit={handleJamaSubmit} className="bg-green-50 p-4 rounded-lg border-2 border-green-200">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* जमा Entry Section */}
+              <div className="bg-green-50 p-4 rounded-lg border-2 border-green-200">
+                <div className="text-center mb-4">
+                  <h2 className="text-xl font-bold text-green-800 marathi-font">जमा नोंद</h2>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  <div>
+                  <div className="md:col-span-2">
                     <label className="block text-xs font-medium text-green-800 marathi-font mb-1">
-                      तारीख *
-                    </label>
-                    <input
-                      type="date"
-                      name="date"
-                      value={jamaFormData.date}
-                      onChange={handleJamaInputChange}
-                      required
-                      disabled={!isOnline}
-                      className={`w-full p-2 text-sm border border-green-300 rounded focus:ring-1 focus:ring-green-500 focus:border-green-500 ${
-                        !isOnline ? 'bg-gray-100 cursor-not-allowed' : ''
-                      }`}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-green-800 marathi-font mb-1">
-                      खाते नंबर *
+                      खाते नंबर
                     </label>
                     <div className="flex gap-2">
                       <input
@@ -806,7 +881,6 @@ const EntryPage: React.FC = () => {
                         name="accountNumber"
                         value={jamaFormData.accountNumber}
                         onChange={handleJamaInputChange}
-                        required
                         disabled={!isOnline}
                         placeholder="खाते नंबर"
                         className={`flex-1 p-2 text-sm border border-green-300 rounded focus:ring-1 focus:ring-green-500 focus:border-green-500 marathi-font ${
@@ -824,8 +898,8 @@ const EntryPage: React.FC = () => {
                         }}
                         disabled={!isOnline}
                         className={`p-2 rounded text-xs ${
-                          isOnline 
-                            ? 'bg-blue-500 hover:bg-blue-600 text-white' 
+                          isOnline
+                            ? 'bg-blue-500 hover:bg-blue-600 text-white'
                             : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                         }`}
                         title="नवीन खाते जोडा"
@@ -839,6 +913,7 @@ const EntryPage: React.FC = () => {
                       </p>
                     )}
                   </div>
+
                   <div>
                     <label className="block text-xs font-medium text-green-800 marathi-font mb-1">
                       पावती नंबर
@@ -855,9 +930,10 @@ const EntryPage: React.FC = () => {
                       }`}
                     />
                   </div>
+
                   <div>
                     <label className="block text-xs font-medium text-green-800 marathi-font mb-1">
-                      रक्कम *
+                      रक्कम
                     </label>
                     <input
                       type="number"
@@ -865,7 +941,6 @@ const EntryPage: React.FC = () => {
                       value={jamaFormData.amount}
                       onChange={handleJamaInputChange}
                       onBlur={(e) => handleAmountBlur('jama', e.target.value)}
-                      required
                       disabled={!isOnline}
                       placeholder="0.00"
                       step="0.01"
@@ -876,16 +951,15 @@ const EntryPage: React.FC = () => {
                     />
                   </div>
                 </div>
-                
-                <div className="mb-4">
+
+                <div>
                   <label className="block text-xs font-medium text-green-800 marathi-font mb-1">
-                    तपशील *
+                    तपशील
                   </label>
                   <textarea
                     name="details"
                     value={jamaFormData.details}
                     onChange={handleJamaInputChange}
-                    required
                     disabled={!isOnline}
                     placeholder="तपशील लिहा..."
                     rows={4}
@@ -894,59 +968,18 @@ const EntryPage: React.FC = () => {
                     }`}
                   />
                 </div>
-                
-                <div className="flex flex-wrap gap-3 justify-center">
-                  <button
-                    type="submit"
-                    disabled={!isOnline}
-                    className={`px-6 py-2 rounded font-medium english-font transition-colors flex items-center gap-2 text-sm ${
-                      isOnline 
-                        ? 'bg-green-600 hover:bg-green-700 text-white' 
-                        : 'bg-gray-400 text-gray-600 cursor-not-allowed'
-                    }`}
-                  >
-                    <Save className="w-4 h-4" />
-                    Save Entry
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleJamaReset}
-                    className="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded font-medium english-font transition-colors flex items-center gap-2 text-sm"
-                  >
-                    <X className="w-4 h-4" />
-                    Reset Form
-                  </button>
-                </div>
-              </form>
-            </div>
-
-            {/* नावे Entry Form */}
-            <div className="bg-white rounded-lg page-shadow ledger-border p-4">
-              <div className="text-center mb-4">
-                <h2 className="text-xl font-bold text-red-800 marathi-font">नावे नोंद</h2>
               </div>
 
-              <form onSubmit={handleNaveSubmit} className="bg-red-50 p-4 rounded-lg border-2 border-red-200">
+              {/* नावे Entry Section */}
+              <div className="bg-red-50 p-4 rounded-lg border-2 border-red-200">
+                <div className="text-center mb-4">
+                  <h2 className="text-xl font-bold text-red-800 marathi-font">नावे नोंद</h2>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  <div>
+                  <div className="md:col-span-2">
                     <label className="block text-xs font-medium text-red-800 marathi-font mb-1">
-                      तारीख *
-                    </label>
-                    <input
-                      type="date"
-                      name="date"
-                      value={naveFormData.date}
-                      onChange={handleNaveInputChange}
-                      required
-                      disabled={!isOnline}
-                      className={`w-full p-2 text-sm border border-red-300 rounded focus:ring-1 focus:ring-red-500 focus:border-red-500 ${
-                        !isOnline ? 'bg-gray-100 cursor-not-allowed' : ''
-                      }`}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-red-800 marathi-font mb-1">
-                      खाते नंबर *
+                      खाते नंबर
                     </label>
                     <div className="flex gap-2">
                       <input
@@ -954,7 +987,6 @@ const EntryPage: React.FC = () => {
                         name="accountNumber"
                         value={naveFormData.accountNumber}
                         onChange={handleNaveInputChange}
-                        required
                         disabled={!isOnline}
                         placeholder="खाते नंबर"
                         className={`flex-1 p-2 text-sm border border-red-300 rounded focus:ring-1 focus:ring-red-500 focus:border-red-500 marathi-font ${
@@ -1005,7 +1037,7 @@ const EntryPage: React.FC = () => {
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-red-800 marathi-font mb-1">
-                      रक्कम *
+                      रक्कम
                     </label>
                     <input
                       type="number"
@@ -1013,7 +1045,6 @@ const EntryPage: React.FC = () => {
                       value={naveFormData.amount}
                       onChange={handleNaveInputChange}
                       onBlur={(e) => handleAmountBlur('nave', e.target.value)}
-                      required
                       disabled={!isOnline}
                       placeholder="0.00"
                       step="0.01"
@@ -1027,13 +1058,12 @@ const EntryPage: React.FC = () => {
                 
                 <div className="mb-4">
                   <label className="block text-xs font-medium text-red-800 marathi-font mb-1">
-                    तपशील *
+                    तपशील
                   </label>
                   <textarea
                     name="details"
                     value={naveFormData.details}
                     onChange={handleNaveInputChange}
-                    required
                     disabled={!isOnline}
                     placeholder="तपशील लिहा..."
                     rows={4}
@@ -1042,32 +1072,32 @@ const EntryPage: React.FC = () => {
                     }`}
                   />
                 </div>
-                
-                <div className="flex flex-wrap gap-3 justify-center">
-                  <button
-                    type="submit"
-                    disabled={!isOnline}
-                    className={`px-6 py-2 rounded font-medium english-font transition-colors flex items-center gap-2 text-sm ${
-                      isOnline 
-                        ? 'bg-red-600 hover:bg-red-700 text-white' 
-                        : 'bg-gray-400 text-gray-600 cursor-not-allowed'
-                    }`}
-                  >
-                    <Save className="w-4 h-4" />
-                    Save Entry
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleNaveReset}
-                    className="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded font-medium english-font transition-colors flex items-center gap-2 text-sm"
-                  >
-                    <X className="w-4 h-4" />
-                    Reset Form
-                  </button>
-                </div>
-              </form>
+              </div>
             </div>
-          </div>
+
+            <div className="flex flex-wrap gap-3 justify-center mt-4">
+              <button
+                type="submit"
+                disabled={!isOnline}
+                className={`px-8 py-2 rounded font-medium english-font transition-colors flex items-center gap-2 text-sm ${
+                  isOnline
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                    : 'bg-gray-400 text-gray-600 cursor-not-allowed'
+                }`}
+              >
+                <Save className="w-4 h-4" />
+                Save Entry
+              </button>
+              <button
+                type="button"
+                onClick={handleCombinedReset}
+                className="bg-gray-500 hover:bg-gray-600 text-white px-8 py-2 rounded font-medium english-font transition-colors flex items-center gap-2 text-sm"
+              >
+                <X className="w-4 h-4" />
+                Reset Form
+              </button>
+            </div>
+          </form>
         )}
 
         {/* Edit Entry Modal */}
@@ -1116,14 +1146,13 @@ const EntryPage: React.FC = () => {
                     <label className={`block text-sm font-medium mb-2 marathi-font ${
                       editingEntry.type === 'जमा' ? 'text-green-800' : 'text-red-800'
                     }`}>
-                      खाते नंबर *
+                      खाते नंबर
                     </label>
                     <input
                       type="text"
                       name="accountNumber"
                       value={editFormData.accountNumber}
                       onChange={handleEditInputChange}
-                      required
                       disabled={!isOnline}
                       placeholder="खाते नंबर"
                       className={`w-full p-3 text-sm border rounded-lg focus:ring-2 focus:ring-opacity-50 marathi-font ${
@@ -1157,7 +1186,7 @@ const EntryPage: React.FC = () => {
                     <label className={`block text-sm font-medium mb-2 marathi-font ${
                       editingEntry.type === 'जमा' ? 'text-green-800' : 'text-red-800'
                     }`}>
-                      रक्कम *
+                      रक्कम
                     </label>
                     <input
                       type="number"
@@ -1165,7 +1194,6 @@ const EntryPage: React.FC = () => {
                       value={editFormData.amount}
                       onChange={handleEditInputChange}
                       onBlur={(e) => handleEditAmountBlur(e.target.value)}
-                      required
                       disabled={!isOnline}
                       placeholder="0.00"
                       step="0.01"
@@ -1183,13 +1211,12 @@ const EntryPage: React.FC = () => {
                   <label className={`block text-sm font-medium mb-2 marathi-font ${
                     editingEntry.type === 'जमा' ? 'text-green-800' : 'text-red-800'
                   }`}>
-                    तपशील *
+                    तपशील
                   </label>
                   <textarea
                     name="details"
                     value={editFormData.details}
                     onChange={handleEditInputChange}
-                    required
                     disabled={!isOnline}
                     placeholder="तपशील लिहा..."
                     rows={4}
@@ -1320,7 +1347,7 @@ const EntryPage: React.FC = () => {
                               {jamaEntry ? resolveCurrentAccountNumber(jamaEntry.accountNumber, jamaEntry.details, accounts) : ''}
                             </td>
                             <td className="p-1 marathi-font border border-black receipt-column text-center align-middle">
-                              {jamaEntry ? (jamaEntry.receiptNumber || '-') : ''}
+                              {jamaEntry ? (jamaEntry.receiptNumber || '') : ''}
                             </td>
                             <td className="p-1 marathi-font leading-relaxed border border-black details-column text-wrap">
                               {jamaEntry ? highlightAccountName(jamaEntry.details, accounts) : ''}
@@ -1352,9 +1379,37 @@ const EntryPage: React.FC = () => {
                                   </button>
                                 </>
                               )}
+                              {!jamaEntry && naveEntry && naveEntry.id && isAdmin && (
+                                <>
+                                  <button
+                                    onClick={() => handleEditEntry(naveEntry)}
+                                    disabled={!isOnline}
+                                    className={`edit-btn ml-2 p-1 rounded text-xs print:hidden ${
+                                      isOnline
+                                        ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                    }`}
+                                    title="Edit Entry"
+                                  >
+                                    <Edit3 className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteEntry(naveEntry.id!)}
+                                    disabled={!isOnline}
+                                    className={`delete-btn ml-2 p-1 rounded text-xs print:hidden ${
+                                      isOnline
+                                        ? 'bg-red-500 hover:bg-red-600 text-white'
+                                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                    }`}
+                                    title="Delete Entry"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                </>
+                              )}
                             </td>
                             <td className="p-1 text-right font-medium english-font border border-black amount-column">
-                              {jamaEntry ? renderAmountWithBreak(jamaEntry.amount) : ''}
+                              {shouldShowAmount(jamaEntry) ? renderAmountWithBreak(jamaEntry!.amount) : ''}
                             </td>
                             
                             {/* नावे side columns */}
@@ -1365,7 +1420,7 @@ const EntryPage: React.FC = () => {
                               {naveEntry ? resolveCurrentAccountNumber(naveEntry.accountNumber, naveEntry.details, accounts) : ''}
                             </td>
                             <td className="p-1 marathi-font border border-black receipt-column text-center align-middle">
-                              {naveEntry ? (naveEntry.receiptNumber || '-') : ''}
+                              {naveEntry ? (naveEntry.receiptNumber || '') : ''}
                             </td>
                             <td className="p-1 marathi-font leading-relaxed border border-black details-column text-wrap">
                               {naveEntry ? highlightAccountName(naveEntry.details, accounts) : ''}
@@ -1397,9 +1452,37 @@ const EntryPage: React.FC = () => {
                                   </button>
                                 </>
                               )}
+                              {!naveEntry && jamaEntry && jamaEntry.id && isAdmin && (
+                                <>
+                                  <button
+                                    onClick={() => handleEditEntry(jamaEntry)}
+                                    disabled={!isOnline}
+                                    className={`edit-btn ml-2 p-1 rounded text-xs print:hidden ${
+                                      isOnline
+                                        ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                    }`}
+                                    title="Edit Entry"
+                                  >
+                                    <Edit3 className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteEntry(jamaEntry.id!)}
+                                    disabled={!isOnline}
+                                    className={`delete-btn ml-2 p-1 rounded text-xs print:hidden ${
+                                      isOnline
+                                        ? 'bg-red-500 hover:bg-red-600 text-white'
+                                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                    }`}
+                                    title="Delete Entry"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                </>
+                              )}
                             </td>
                             <td className="p-1 text-right font-medium english-font border border-black amount-column">
-                              {naveEntry ? renderAmountWithBreak(naveEntry.amount) : ''}
+                              {shouldShowAmount(naveEntry) ? renderAmountWithBreak(naveEntry!.amount) : ''}
                             </td>
                           </tr>
                         );
@@ -1407,8 +1490,8 @@ const EntryPage: React.FC = () => {
                       
                       {/* Add daily total row */}
                       {(() => {
-                        const dailyJamaTotal = jamaEntriesForDate.reduce((sum, entry) => sum + entry.amount, 0);
-                        const dailyNaveTotal = naveEntriesForDate.reduce((sum, entry) => sum + entry.amount, 0);
+                        const dailyJamaTotal = jamaEntriesForDate.reduce((sum, entry) => sum + (hasEntryAmount(entry.amount) ? entry.amount : 0), 0);
+                        const dailyNaveTotal = naveEntriesForDate.reduce((sum, entry) => sum + (hasEntryAmount(entry.amount) ? entry.amount : 0), 0);
                         
                         return (
                           <tr className="daily-total-row bg-blue-100 font-medium print:bg-gray-100 print-page-break-inside-avoid">
@@ -1430,8 +1513,8 @@ const EntryPage: React.FC = () => {
 
                       {/* Add शिल्लक row after each date */}
                       {(() => {
-                        const dailyJamaTotal = jamaEntriesForDate.reduce((sum, entry) => sum + entry.amount, 0);
-                        const dailyNaveTotal = naveEntriesForDate.reduce((sum, entry) => sum + entry.amount, 0);
+                        const dailyJamaTotal = jamaEntriesForDate.reduce((sum, entry) => sum + (hasEntryAmount(entry.amount) ? entry.amount : 0), 0);
+                        const dailyNaveTotal = naveEntriesForDate.reduce((sum, entry) => sum + (hasEntryAmount(entry.amount) ? entry.amount : 0), 0);
                         const dailyBalance = dailyJamaTotal - dailyNaveTotal;
                         
                         return (
