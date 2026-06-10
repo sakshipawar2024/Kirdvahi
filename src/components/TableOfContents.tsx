@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSchool } from '../contexts/SchoolContext';
-import { BookOpen, Plus, Edit3, Edit, Trash2, Save, X, Download, Wifi, WifiOff, FileText } from 'lucide-react';
+import { BookOpen, Plus, Edit3, Edit, Trash2, Save, X, Download, Wifi, WifiOff, FileText, BarChart3 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { accountsFirebase, entriesFirebase, Account, Entry, handleFirebaseError } from '../services/firebaseService';
 import AdminHeader from './AdminHeader';
@@ -455,6 +455,23 @@ const TableOfContents: React.FC<TableOfContentsProps> = ({ hideAdminHeader = fal
                 <Plus className="w-5 h-5" />
                 खाते जोडा
               </button>
+              <Link
+                to="/admin/account-summary"
+                className={`px-6 py-3 rounded-lg font-medium marathi-font transition-colors inline-flex items-center gap-2 ${
+                  isOnline
+                    ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                    : 'bg-gray-400 text-gray-600 cursor-not-allowed'
+                }`}
+                onClick={(e) => {
+                  if (!isOnline) {
+                    e.preventDefault();
+                    alert('इंटरनेट कनेक्शन नाही! कृपया ऑनलाइन येऊन पुन्हा प्रयत्न करा.');
+                  }
+                }}
+              >
+                <BarChart3 className="w-5 h-5" />
+                एकूण जमा/नावे
+              </Link>
             </div>
           )}
 
@@ -720,6 +737,13 @@ const TableOfContents: React.FC<TableOfContentsProps> = ({ hideAdminHeader = fal
                       <Download className="w-5 h-5" />
                       खतावणी Excel
                     </button>
+                    <Link
+                      to="/admin/account-summary"
+                      className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg font-medium marathi-font transition-colors inline-flex items-center gap-2"
+                    >
+                      <BarChart3 className="w-5 h-5" />
+                      एकूण जमा/नावे
+                    </Link>
                   </div>
                 </div>
               )}
